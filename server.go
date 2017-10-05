@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -21,6 +22,10 @@ var (
 
 type JSONHandler struct {
 	h http.HandlerFunc
+}
+
+type JSONResponse struct {
+	data []string
 }
 
 func (j JSONHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -65,7 +70,13 @@ func getImagesHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	fmt.Fprint(w, links)
+	linksJSON, err := json.Marshal(JSONResponse{data: links})
+
+	if err != nil {
+		fmt.Println(err.Error())
+	}
+
+	fmt.Fprint(w, fmt.Sprintf("%s", linksJSON))
 }
 
 func getImages(_path string) ([]string, error) {
@@ -73,7 +84,6 @@ func getImages(_path string) ([]string, error) {
 	ctx := context.Background()
 	links := make([]string, 0)
 
-	//query := &storage.Query{Prefix: "tiles/35/K/KQ/S2A_MSIL1C_20160104T083649_N0201_R078_T35KKQ_20160104T155000.SAFE/GRANULE/"}
 	query := &storage.Query{Prefix: _path}
 
 	it := StorageBucket.Objects(ctx, query)
@@ -112,7 +122,7 @@ func getBaseURLs(lng string, lat string) (*bigquery.RowIterator, error) {
 
 	sql := fmt.Sprintf(`SELECT base_url 
 		FROM`+" `bigquery-public-data.cloud_storage_geo_index.sentinel_2_index` "+
-		`WHERE south_lat <= %s AND north_lat >= %s AND west_lon <= %s AND east_lon >= %s;`,
+		`WHERE south_lat <= %s AND north_lat >= %s AND west_lon <= %s AND east_lon >= %s LIMIT 1;`,
 		lat, lat, lng, lng)
 
 	fmt.Println(sql)
