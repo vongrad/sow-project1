@@ -24,10 +24,6 @@ type JSONHandler struct {
 	h http.HandlerFunc
 }
 
-type JSONResponse struct {
-	data []string
-}
-
 func (j JSONHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	j.h(w, r)
@@ -70,7 +66,7 @@ func getImagesHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	linksJSON, err := json.Marshal(JSONResponse{data: links})
+	linksJSON, err := json.Marshal(links)
 
 	if err != nil {
 		fmt.Println(err.Error())
