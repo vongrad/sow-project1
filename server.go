@@ -11,6 +11,7 @@ import (
 	"cloud.google.com/go/bigquery"
 	"cloud.google.com/go/storage"
 	"github.com/gorilla/mux"
+	"github.com/vongrad/geocoding"
 	"golang.org/x/net/context"
 	"google.golang.org/api/iterator"
 )
@@ -31,8 +32,27 @@ func (j JSONHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func getImagesHandler(w http.ResponseWriter, r *http.Request) {
 
-	lng := r.FormValue("lng")
-	lat := r.FormValue("lat")
+	var lng string
+	var lat string
+
+	address := r.FormValue("address")
+
+	if address != "" {
+		api := geocoding.API{APIKey: "AIzaSyDnqUXP9FS9Ikk6DABkGnVhAaOnEfpLUKA"}
+
+		latitude, longitude, err := api.Geocode(address)
+
+		if err != nil {
+			fmt.Println(err.Error())
+		}
+
+		lat = fmt.Sprintf("%f", latitude)
+		lng = fmt.Sprintf("%f", longitude)
+
+	} else {
+		lng = r.FormValue("lng")
+		lat = r.FormValue("lat")
+	}
 
 	links := make([]string, 0)
 
