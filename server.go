@@ -43,7 +43,7 @@ func getImagesHandler(w http.ResponseWriter, r *http.Request) {
 		latitude, longitude, err := api.Geocode(address)
 
 		if err != nil {
-			fmt.Println(err.Error())
+			http.Error(w, err.Error(), http.StatusBadRequest)
 		}
 
 		lat = fmt.Sprintf("%f", latitude)
@@ -52,6 +52,11 @@ func getImagesHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		lng = r.FormValue("lng")
 		lat = r.FormValue("lat")
+
+		if lng == "" || lat == "" {
+			http.Error(w, "Not enough parameters to complete the request", http.StatusBadRequest)
+			return
+		}
 	}
 
 	links := make([]string, 0)
@@ -59,7 +64,7 @@ func getImagesHandler(w http.ResponseWriter, r *http.Request) {
 	dbit, err := getBaseURLs(lng, lat)
 
 	if err != nil {
-		fmt.Println(err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 
 	for {
@@ -72,7 +77,8 @@ func getImagesHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err != nil {
-			fmt.Println(err.Error())
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
 
 		path := strings.TrimPrefix(row[0].(string), "gs://gcp-public-data-sentinel-2/") + "/GRANULE/"
@@ -82,17 +88,21 @@ func getImagesHandler(w http.ResponseWriter, r *http.Request) {
 		links = append(links, _links...)
 
 		if err != nil {
-			fmt.Println(err.Error())
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
 	}
 
-	linksJSON, err := json.Marshal(links)
+	enc := json.NewEncoder(w)
+	// Do not escape ampersands ('\0026')
+	enc.SetEscapeHTML(false)
+
+	err = enc.Encode(links)
 
 	if err != nil {
-		fmt.Println(err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
-
-	fmt.Fprint(w, fmt.Sprintf("%s", linksJSON))
 }
 
 func getImages(_path string) ([]string, error) {
@@ -112,12 +122,12 @@ func getImages(_path string) ([]string, error) {
 		}
 
 		if err != nil {
-			fmt.Println(err.Error())
 			return nil, err
 		}
 
 		// Get only .jp2 files
 		if path.Ext(objAttrs.Name) == ".jp2" {
+			fmt.Println(objAttrs.MediaLink)
 			links = append(links, objAttrs.MediaLink)
 		}
 	}
@@ -127,8 +137,6 @@ func getImages(_path string) ([]string, error) {
 
 func getBaseURLs(lng string, lat string) (*bigquery.RowIterator, error) {
 	ctx := context.Background()
-
-	fmt.Println(lat, lng)
 
 	client, err := bigquery.NewClient(ctx, "avon-178408")
 
@@ -140,8 +148,6 @@ func getBaseURLs(lng string, lat string) (*bigquery.RowIterator, error) {
 		FROM`+" `bigquery-public-data.cloud_storage_geo_index.sentinel_2_index` "+
 		`WHERE south_lat <= %s AND north_lat >= %s AND west_lon <= %s AND east_lon >= %s LIMIT 1;`,
 		lat, lat, lng, lng)
-
-	fmt.Println(sql)
 
 	query := client.Query(sql)
 
@@ -163,18 +169,8 @@ func getBucketHandle(bucketID string) (*storage.BucketHandle, error) {
 	return client.Bucket(bucketID), nil
 }
 
-func registerHandlers() {
-
-	r := mux.NewRouter()
-
-	r.Handle("/image", JSONHandler{getImagesHandler}).Methods("GET")
-
-	http.Handle("/", r)
-
-	http.ListenAndServe("127.0.0.1:8888", r)
-}
-
 func main() {
+
 	var err error
 
 	StorageBucketName = "gcp-public-data-sentinel-2"
@@ -184,5 +180,11 @@ func main() {
 		log.Fatal(err.Error())
 	}
 
-	registerHandlers()
+	r := mux.NewRouter()
+
+	r.Handle("/image", JSONHandler{getImagesHandler}).Methods("GET")
+
+	http.Handle("/", r)
+
+	http.ListenAndServe("127.0.0.1:8888", r)
 }
