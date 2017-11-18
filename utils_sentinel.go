@@ -67,7 +67,6 @@ func getPolygonImages(degreePoints []Point) (int, error) {
 
 	// Should get back exactly len(cover) messages
 	for i := 0; i < len(cover); i++ {
-		fmt.Printf("Index: %v \n", i)
 		select {
 		case err := <-chAbort:
 			return 0, err
@@ -105,10 +104,12 @@ func getImageURLs(lat1 string, lng1 string, lat2 string, lng2 string) ([]string,
 	rowCount := 0
 
 	chReq := make(chan GranuleRequest)
-	chResp := make(chan GranuleResult)
+	chResp := make(chan GranuleResult, 100)
 	chAbort := make(chan error)
 
-	balancer := NewBalancer(50, 10)
+	// This can deadlick if the second argument is not big enough since the worker buffer gets filled-up,
+	// however nobody is taking out the responses
+	balancer := NewBalancer(100, 50)
 
 	// Start-up the load balancer
 	go balancer.Balance(chReq, chAbort)
@@ -131,16 +132,6 @@ func getImageURLs(lat1 string, lng1 string, lat2 string, lng2 string) ([]string,
 		url := strings.TrimPrefix(row[0].(string), "gs://gcp-public-data-sentinel-2/") + "/GRANULE/" + row[1].(string) + "/IMG_DATA/"
 
 		chReq <- GranuleRequest{ch: chResp, url: url, fn: getImages}
-
-		// Execute in parallel
-		// go func(path string, chLinks chan []string, chAbort chan error) {
-		// 	links, err := getImages(path)
-		// 	if err != nil {
-		// 		chAbort <- err
-		// 	} else {
-		// 		chLinks <- links
-		// 	}
-		// }(path, chLinks, chAbort)
 	}
 
 	// Wait for responses from all go-routines
@@ -148,7 +139,6 @@ func getImageURLs(lat1 string, lng1 string, lat2 string, lng2 string) ([]string,
 		select {
 		case resp := <-chResp:
 			if resp.err != nil {
-				fmt.Println("Error: " + err.Error())
 				chAbort <- resp.err
 				return nil, resp.err
 			}
@@ -157,11 +147,6 @@ func getImageURLs(lat1 string, lng1 string, lat2 string, lng2 string) ([]string,
 	}
 
 	fmt.Println("Finishing!!!")
-
-	// Close channels
-	close(chReq)
-	close(chResp)
-	close(chAbort)
 
 	return links, nil
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"container/heap"
+	"fmt"
 )
 
 // GranuleRequest is used to fetch all image urls from a single granule
@@ -95,13 +96,13 @@ func (b Balancer) Balance(work chan GranuleRequest, abort chan error) {
 
 	for {
 		select {
-		case <-abort:
+		case err := <-abort:
+			if err != nil {
+				fmt.Println(err.Error())
+			}
 			// TODO: cancel running routines, if possible
 			return
-		case r, ok := <-work:
-			if !ok {
-				return
-			}
+		case r := <-work:
 			b.dispatch(r)
 		case w := <-b.done:
 			b.complete(w)
