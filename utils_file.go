@@ -8,12 +8,13 @@ import "strings"
 
 import "strconv"
 
-// Point holds x, y coordinates in degrees
+// Point holds latitude, longitude coordinates in degrees
 type Point struct {
-	x float64
-	y float64
+	lat float64
+	lng float64
 }
 
+// Download a file from a specified path
 func downloadFile(path string) ([]byte, error) {
 	r, err := http.Get(path)
 
@@ -28,6 +29,7 @@ func downloadFile(path string) ([]byte, error) {
 	return data, err
 }
 
+// Parse .poly file line by line from a byte array
 func parsePolyData(data []byte) ([]Point, error) {
 	scanner := bufio.NewScanner(strings.NewReader(string(data)))
 	scanner.Split(bufio.ScanLines)
@@ -45,16 +47,16 @@ func parsePolyData(data []byte) ([]Point, error) {
 
 		arr := strings.Split(line, "   ")
 
-		x, err := strconv.ParseFloat(arr[0], 64)
+		lat, err := strconv.ParseFloat(arr[1], 32)
 		if err != nil {
 			return nil, err
 		}
-		y, err := strconv.ParseFloat(arr[1], 64)
+		lng, err := strconv.ParseFloat(arr[0], 32)
 		if err != nil {
 			return nil, err
 		}
 
-		points = append(points, Point{x: x, y: y})
+		points = append(points, Point{lat: lat, lng: lng})
 	}
 
 	return points, nil
