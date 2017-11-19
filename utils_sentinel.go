@@ -14,8 +14,8 @@ import (
 	"google.golang.org/api/iterator"
 )
 
-// Get images from all granules bounded by a polygon
-func getPolygonImages(degreePoints []Point) (int, error) {
+// Get number of images from all granules bounded by a polygon
+func getPolygonImages(degreePoints []Point) (int64, error) {
 	points := make([]s2.Point, 0)
 
 	// Order matters here!
@@ -30,22 +30,20 @@ func getPolygonImages(degreePoints []Point) (int, error) {
 	rc := &s2.RegionCoverer{MaxLevel: 30, MaxCells: 20}
 	cover := rc.Covering(poly)
 
-	count := 0
+	var imageCount int64 = 0
+
 	var rect s2.Rect
-	var err error
-	var urls []string
 
 	chAbort := make(chan error)
-	chCount := make(chan int)
+	chCount := make(chan int64)
 
 	fmt.Printf("Channel amount: %v \n", len(cover))
 
 	for i := 0; i < len(cover); i++ {
 		rect = s2.CellFromCellID(cover[i]).RectBound()
-
 		// Execute each request concurrently
-		go func(rect s2.Rect, chCount chan int, chAbort chan error) {
-			urls, err = getImageURLs(strconv.FormatFloat(rect.RectBound().Lat.Lo*180.0/math.Pi, 'f', 6, 64),
+		go func(rect s2.Rect, chCount chan int64, chAbort chan error) {
+			count, err := getImageCount(strconv.FormatFloat(rect.RectBound().Lat.Lo*180.0/math.Pi, 'f', 6, 64),
 				strconv.FormatFloat(rect.RectBound().Lng.Lo*180.0/math.Pi, 'f', 6, 64),
 				strconv.FormatFloat(rect.RectBound().Lat.Hi*180.0/math.Pi, 'f', 6, 64),
 				strconv.FormatFloat(rect.RectBound().Lng.Hi*180.0/math.Pi, 'f', 6, 64))
@@ -55,12 +53,12 @@ func getPolygonImages(degreePoints []Point) (int, error) {
 				rect.RectBound().Lat.Hi*180.0/math.Pi,
 				rect.RectBound().Lng.Lo*180.0/math.Pi,
 				rect.RectBound().Lng.Hi*180.0/math.Pi,
-				len(urls))
+				count)
 
 			if err != nil {
 				chAbort <- err
 			} else {
-				chCount <- len(urls)
+				chCount <- count
 			}
 		}(rect, chCount, chAbort)
 	}
@@ -71,14 +69,15 @@ func getPolygonImages(degreePoints []Point) (int, error) {
 		case err := <-chAbort:
 			return 0, err
 		case c := <-chCount:
-			count += c
-			fmt.Printf("Total count increased to: %v \n", count)
+			imageCount += c
+			fmt.Printf("Image count increased to: %v \n", imageCount)
 		}
 	}
 
 	fmt.Println("**********Finished!!!!")
+	fmt.Println("total count is ", imageCount)
 
-	return count, nil
+	return imageCount, nil
 }
 
 // Get images in all granules intersecting specific geo bound
@@ -189,7 +188,8 @@ func getImages(_path string) GranuleResult {
 func getBaseURLs(lng string, lat string) (*bigquery.RowIterator, error) {
 	ctx := context.Background()
 
-	client, err := bigquery.NewClient(ctx, "avon-178408")
+	// client, err := bigquery.NewClient(ctx, "avon-178408")
+	client, err := bigquery.NewClient(ctx, "darb-178408")
 
 	if err != nil {
 		return nil, err
@@ -213,7 +213,8 @@ func getBaseURLs2(lng1 string, lat1 string, lng2 string, lat2 string) (*bigquery
 
 	ctx := context.Background()
 
-	client, err := bigquery.NewClient(ctx, "avon-178408")
+	// client, err := bigquery.NewClient(ctx, "avon-178408")
+	client, err := bigquery.NewClient(ctx, "darb-178408")
 
 	if err != nil {
 		return nil, err
@@ -248,4 +249,51 @@ func getBucketHandle(bucketID string) (*storage.BucketHandle, error) {
 	}
 
 	return client.Bucket(bucketID), nil
+}
+
+// Get the count of urls for all granules intersecting two (latitude, longitude) coordinates
+func getImageCount(lat1 string, lng1 string, lat2 string, lng2 string) (int64, error) {
+	var err error
+	var dbit *bigquery.RowIterator
+
+	ctx := context.Background()
+
+	// client, err := bigquery.NewClient(ctx, "avon-178408")
+	client, err := bigquery.NewClient(ctx, "darb-178408")
+
+	if err != nil {
+		return 0, err
+	}
+
+	// The granule intersects any of the (top, left), (bottom, left), (top, right), (bottom, right) corners of the input-bounds
+	// The input-bounds is fully within the granule
+	// The granule bounds is fully contained in input-bounds
+	sql := fmt.Sprintf(`SELECT count(*) 
+		FROM`+" `bigquery-public-data.cloud_storage_geo_index.sentinel_2_index` "+
+		`WHERE 
+			(((south_lat BETWEEN %s AND %s) OR (north_lat BETWEEN %s AND %s)) AND ((west_lon BETWEEN %s AND %s) OR (east_lon BETWEEN %s AND %s))) OR
+			((%s BETWEEN south_lat AND north_lat AND %s BETWEEN south_lat AND north_lat) AND (%s BETWEEN west_lon AND east_lon AND %s BETWEEN west_lon AND east_lon)) OR
+			((south_lat BETWEEN %s AND %s AND north_lat BETWEEN %s AND %s) AND (west_lon BETWEEN %s AND %s AND east_lon BETWEEN %s AND %s))
+		`, lat1, lat2, lat1, lat2, lng1, lng2, lng1, lng2, lat1, lat2, lng1, lng2, lat1, lat2, lat1, lat2, lng1, lng2, lng1, lng2)
+
+	query := client.Query(sql)
+	query.QueryConfig.UseStandardSQL = true
+
+	dbit, err = query.Read(ctx)
+
+	if err != nil {
+		return 0, err
+	}
+
+	var row []bigquery.Value
+
+	// aggregate function count returns one row
+	err = dbit.Next(&row)
+
+	if err != nil {
+		return 0, err
+	}
+	// we know that there are always 13 images per Granule
+	totalCount := row[0].(int64) * 13
+	return totalCount, nil
 }
