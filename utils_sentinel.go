@@ -14,6 +14,11 @@ import (
 	"google.golang.org/api/iterator"
 )
 
+// ProjectID refers to Google Cloud project-id
+const ProjectID = "avon-178408"
+
+//const ProjectID = "darb-178408"
+
 // Get number of images from all granules bounded by a polygon
 func getPolygonImages(degreePoints []Point) (int64, error) {
 	points := make([]s2.Point, 0)
@@ -30,14 +35,12 @@ func getPolygonImages(degreePoints []Point) (int64, error) {
 	rc := &s2.RegionCoverer{MaxLevel: 30, MaxCells: 20}
 	cover := rc.Covering(poly)
 
-	var imageCount int64 = 0
+	var imageCount int64
 
 	var rect s2.Rect
 
 	chAbort := make(chan error)
 	chCount := make(chan int64)
-
-	fmt.Printf("Channel amount: %v \n", len(cover))
 
 	for i := 0; i < len(cover); i++ {
 		rect = s2.CellFromCellID(cover[i]).RectBound()
@@ -47,13 +50,6 @@ func getPolygonImages(degreePoints []Point) (int64, error) {
 				strconv.FormatFloat(rect.RectBound().Lng.Lo*180.0/math.Pi, 'f', 6, 64),
 				strconv.FormatFloat(rect.RectBound().Lat.Hi*180.0/math.Pi, 'f', 6, 64),
 				strconv.FormatFloat(rect.RectBound().Lng.Hi*180.0/math.Pi, 'f', 6, 64))
-
-			fmt.Printf("Request for LatLO: %v, LatHI: %v, LngLO: %v, LngHI: %v completed with count: %v \n",
-				rect.RectBound().Lat.Lo*180.0/math.Pi,
-				rect.RectBound().Lat.Hi*180.0/math.Pi,
-				rect.RectBound().Lng.Lo*180.0/math.Pi,
-				rect.RectBound().Lng.Hi*180.0/math.Pi,
-				count)
 
 			if err != nil {
 				chAbort <- err
@@ -70,12 +66,8 @@ func getPolygonImages(degreePoints []Point) (int64, error) {
 			return 0, err
 		case c := <-chCount:
 			imageCount += c
-			fmt.Printf("Image count increased to: %v \n", imageCount)
 		}
 	}
-
-	fmt.Println("**********Finished!!!!")
-	fmt.Println("total count is ", imageCount)
 
 	return imageCount, nil
 }
@@ -145,8 +137,6 @@ func getImageURLs(lat1 string, lng1 string, lat2 string, lng2 string) ([]string,
 		}
 	}
 
-	fmt.Println("Finishing!!!")
-
 	return links, nil
 }
 
@@ -188,8 +178,7 @@ func getImages(_path string) GranuleResult {
 func getBaseURLs(lng string, lat string) (*bigquery.RowIterator, error) {
 	ctx := context.Background()
 
-	// client, err := bigquery.NewClient(ctx, "avon-178408")
-	client, err := bigquery.NewClient(ctx, "darb-178408")
+	client, err := bigquery.NewClient(ctx, ProjectID)
 
 	if err != nil {
 		return nil, err
@@ -213,8 +202,7 @@ func getBaseURLs2(lng1 string, lat1 string, lng2 string, lat2 string) (*bigquery
 
 	ctx := context.Background()
 
-	// client, err := bigquery.NewClient(ctx, "avon-178408")
-	client, err := bigquery.NewClient(ctx, "darb-178408")
+	client, err := bigquery.NewClient(ctx, ProjectID)
 
 	if err != nil {
 		return nil, err
@@ -258,8 +246,7 @@ func getImageCount(lat1 string, lng1 string, lat2 string, lng2 string) (int64, e
 
 	ctx := context.Background()
 
-	// client, err := bigquery.NewClient(ctx, "avon-178408")
-	client, err := bigquery.NewClient(ctx, "darb-178408")
+	client, err := bigquery.NewClient(ctx, ProjectID)
 
 	if err != nil {
 		return 0, err
