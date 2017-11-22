@@ -20,7 +20,7 @@ const ProjectID = "avon-178408"
 //const ProjectID = "darb-178408"
 
 // Get number of images from all granules bounded by a polygon
-func getPolygonImages(degreePoints []Point) (int64, error) {
+func getPolygonImages(degreePoints []Point) (int, error) {
 	points := make([]s2.Point, 0)
 
 	// Order matters here!
@@ -32,21 +32,19 @@ func getPolygonImages(degreePoints []Point) (int64, error) {
 	loops := []*s2.Loop{l1}
 	poly := s2.PolygonFromLoops(loops)
 
-	rc := &s2.RegionCoverer{MaxLevel: 30, MaxCells: 30}
+	rc := &s2.RegionCoverer{MaxLevel: 30, MaxCells: 40}
 	cover := rc.Covering(poly)
-
-	var imageCount int64
 
 	var rect s2.Rect
 
 	chAbort := make(chan error)
-	chCount := make(chan int64)
+	chGranules := make(chan []string)
 
 	for i := 0; i < len(cover); i++ {
 		rect = s2.CellFromCellID(cover[i]).RectBound()
 		// Execute each request concurrently
-		go func(rect s2.Rect, chCount chan int64, chAbort chan error) {
-			count, err := getImageCount(strconv.FormatFloat(rect.RectBound().Lat.Lo*180.0/math.Pi, 'f', 6, 64),
+		go func(rect s2.Rect, chCount chan []string, chAbort chan error) {
+			ids, err := getGranuleIDs(strconv.FormatFloat(rect.RectBound().Lat.Lo*180.0/math.Pi, 'f', 6, 64),
 				strconv.FormatFloat(rect.RectBound().Lng.Lo*180.0/math.Pi, 'f', 6, 64),
 				strconv.FormatFloat(rect.RectBound().Lat.Hi*180.0/math.Pi, 'f', 6, 64),
 				strconv.FormatFloat(rect.RectBound().Lng.Hi*180.0/math.Pi, 'f', 6, 64))
@@ -54,22 +52,28 @@ func getPolygonImages(degreePoints []Point) (int64, error) {
 			if err != nil {
 				chAbort <- err
 			} else {
-				chCount <- count
+				chGranules <- ids
 			}
-		}(rect, chCount, chAbort)
+		}(rect, chGranules, chAbort)
 	}
+
+	distinctIDs := make(map[string]bool)
 
 	// Should get back exactly len(cover) messages
 	for i := 0; i < len(cover); i++ {
 		select {
 		case err := <-chAbort:
 			return 0, err
-		case c := <-chCount:
-			imageCount += c
+		case ids := <-chGranules:
+			for _, id := range ids {
+				distinctIDs[id] = true
+			}
 		}
 	}
 
-	return imageCount, nil
+	count := len(distinctIDs) * 13
+
+	return count, nil
 }
 
 // Get images in all granules intersecting specific geo bound
@@ -239,8 +243,8 @@ func getBucketHandle(bucketID string) (*storage.BucketHandle, error) {
 	return client.Bucket(bucketID), nil
 }
 
-// Get the count of urls for all granules intersecting two (latitude, longitude) coordinates
-func getImageCount(lat1 string, lng1 string, lat2 string, lng2 string) (int64, error) {
+// Get all granule ids intersecting two (latitude, longitude) coordinates
+func getGranuleIDs(lat1 string, lng1 string, lat2 string, lng2 string) ([]string, error) {
 	var err error
 	var dbit *bigquery.RowIterator
 
@@ -249,13 +253,13 @@ func getImageCount(lat1 string, lng1 string, lat2 string, lng2 string) (int64, e
 	client, err := bigquery.NewClient(ctx, ProjectID)
 
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	// The granule intersects any of the (top, left), (bottom, left), (top, right), (bottom, right) corners of the input-bounds
 	// The input-bounds is fully within the granule
 	// The granule bounds is fully contained in input-bounds
-	sql := fmt.Sprintf(`SELECT count(*) 
+	sql := fmt.Sprintf(`SELECT granule_id 
 		FROM`+" `bigquery-public-data.cloud_storage_geo_index.sentinel_2_index` "+
 		`WHERE 
 			(((south_lat BETWEEN %s AND %s) OR (north_lat BETWEEN %s AND %s)) AND ((west_lon BETWEEN %s AND %s) OR (east_lon BETWEEN %s AND %s))) OR
@@ -269,18 +273,25 @@ func getImageCount(lat1 string, lng1 string, lat2 string, lng2 string) (int64, e
 	dbit, err = query.Read(ctx)
 
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	var row []bigquery.Value
 
-	// aggregate function count returns one row
-	err = dbit.Next(&row)
+	granuleIDs := make([]string, 0)
+
+	for {
+		err := dbit.Next(&row)
+
+		if err == iterator.Done {
+			break
+		}
+		granuleIDs = append(granuleIDs, row[0].(string))
+	}
 
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	// we know that there are always 13 images per Granule
-	totalCount := row[0].(int64) * 13
-	return totalCount, nil
+
+	return granuleIDs, nil
 }

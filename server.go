@@ -148,7 +148,7 @@ func getCountryHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type Count struct {
-		Count int64
+		Count int
 	}
 
 	enc := json.NewEncoder(w)
