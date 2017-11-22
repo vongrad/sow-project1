@@ -32,7 +32,7 @@ func getPolygonImages(degreePoints []Point) (int64, error) {
 	loops := []*s2.Loop{l1}
 	poly := s2.PolygonFromLoops(loops)
 
-	rc := &s2.RegionCoverer{MaxLevel: 30, MaxCells: 20}
+	rc := &s2.RegionCoverer{MaxLevel: 30, MaxCells: 30}
 	cover := rc.Covering(poly)
 
 	var imageCount int64
